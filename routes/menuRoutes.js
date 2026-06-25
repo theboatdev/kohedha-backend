@@ -9,6 +9,7 @@ import {
   deleteMenuItem,
   uploadMenuPDF,
   saveEditedPDFMenuItems,
+  getMenuVoteSummary,
 } from "../controller/menuController.js";
 import { protect } from "../middleware/auth.js";
 
@@ -23,6 +24,8 @@ router.post("/create", uploadMenuImage.single("image"), createMenuItem);
 router.post("/upload-csv", upload.single("file"), uploadMenuCSV);
 router.post("/analyze-csv", upload.single("file"), analyzeCSV);
 router.get("/", getMenuItems);
+// /votes must come before /:id to prevent Express matching "votes" as a param
+router.get("/votes", getMenuVoteSummary);
 router.put("/:id", uploadMenuImage.single("image"), updateMenuItem);
 router.delete("/:id", deleteMenuItem);
 
