@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import Menu from "../models/menuModel.js";
 import { parseCSV } from "../utils/csvParser.js";
 import {
@@ -728,6 +729,92 @@ export const createMenuItem = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to create menu item",
+      error: error.message,
+    });
+  }
+};
+
+// GET /api/vendor/menu/votes
+// Returns per-item upvote/downvote summary for the authenticated vendor.
+// The voters[] array is intentionally excluded (contains consumer Firebase UIDs).
+// Query params:
+//   sortBy  = "upvotes" (default) | "downvotes" | "net" | "category"
+//   category = filter to a single category
+export const getMenuVoteSummary = async (req, res) => {
+  try {
+    const vendorId = new mongoose.Types.ObjectId(req.vendor.id);
+    const { category, sortBy = "upvotes" } = req.query;
+
+    const match = { vendorId };
+    if (category) match.category = category;
+
+    const sortMap = {
+      upvotes:   { upvotes: -1, name: 1 },
+      downvotes: { downvotes: -1, name: 1 },
+      net:       { netVotes: -1, name: 1 },
+      category:  { category: 1, name: 1 },
+    };
+    const sortStage = sortMap[sortBy] ?? sortMap.upvotes;
+
+    const [result] = await Menu.aggregate([
+      { $match: match },
+      {
+        $addFields: {
+          netVotes: { $subtract: ["$upvotes", "$downvotes"] },
+        },
+      },
+      { $sort: sortStage },
+      {
+        $group: {
+          _id: null,
+          totalUpvotes: { $sum: "$upvotes" },
+          totalDownvotes: { $sum: "$downvotes" },
+          items: {
+            $push: {
+              _id: "$_id",
+              name: "$name",
+              category: "$category",
+              upvotes: "$upvotes",
+              downvotes: "$downvotes",
+              netVotes: "$netVotes",
+              is_available: "$is_available",
+            },
+          },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          totalUpvotes: 1,
+          totalDownvotes: 1,
+          itemCount: { $size: "$items" },
+          items: 1,
+        },
+      },
+    ]);
+
+    // If the vendor has no menu items yet, return zeros
+    if (!result) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          totalUpvotes: 0,
+          totalDownvotes: 0,
+          itemCount: 0,
+          items: [],
+        },
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    console.error("Get menu vote summary error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to retrieve menu vote summary",
       error: error.message,
     });
   }
