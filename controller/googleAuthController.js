@@ -31,7 +31,7 @@ export const googleCallback = (req, res) => {
       redirectUrl = `${process.env.FRONTEND_URL}/vendors/dashboard`;
     }
 
-    res.redirect(redirectUrl);
+    res.redirect(`${redirectUrl}?token=${token}`);
   } catch (error) {
     console.error("Google callback error: ", error);
     res.redirect(`${process.env.FRONTEND_URL}/vendors/login?error=auth_failed`);

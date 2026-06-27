@@ -1,5 +1,7 @@
+import mongoose from "mongoose";
 import Deal from "../models/dealModel.js";
 import Event from "../models/eventModel.js";
+import Menu from "../models/menuModel.js";
 import Reservation from "../models/reservationModel.js";
 
 // Get vendor dashboard analytics
@@ -38,12 +40,15 @@ export const getDashboardAnalytics = async (req, res) => {
       59,
     );
 
+    const vendorObjectId = new mongoose.Types.ObjectId(vendorId);
+
     // Parallel data fetching for performance
     const [
       activeDealsCount,
       upcomingEventsCount,
       monthlyReservationsCount,
       ongoingReservationsCount,
+      menuUpvotesResult,
     ] = await Promise.all([
       // Count active deals
       Deal.countDocuments({
@@ -73,7 +78,16 @@ export const getDashboardAnalytics = async (req, res) => {
         reservationDate: { $gte: startOfToday, $lte: endOfToday },
         status: "confirmed",
       }),
+
+      // Sum all upvotes across the vendor's menu items
+      Menu.aggregate([
+        { $match: { vendorId: vendorObjectId } },
+        { $group: { _id: null, total: { $sum: "$upvotes" } } },
+      ]),
     ]);
+
+    const totalMenuUpvotes =
+      menuUpvotesResult.length > 0 ? menuUpvotesResult[0].total : 0;
 
     // Mock data for features not yet implemented
     const mockData = {
@@ -94,6 +108,7 @@ export const getDashboardAnalytics = async (req, res) => {
           upcomingEvents: upcomingEventsCount,
           monthlyReservations: monthlyReservationsCount,
           ongoingReservations: ongoingReservationsCount,
+          totalMenuUpvotes,
         },
         performance: mockData.performance, // Mock
       },
