@@ -27,6 +27,15 @@ function withVendorLocation(doc) {
   };
 }
 
+function withDealVenueInfo(doc) {
+  const item = doc.toObject ? doc.toObject() : { ...doc };
+  const vendor = item.vendorId;
+  return {
+    ...withVendorLocation(doc),
+    venueName: vendor?.companyName || vendor?.location?.businessName || null,
+  };
+}
+
 function withBookingSlotInfo(doc) {
   const item = doc.toObject ? doc.toObject() : { ...doc };
   const vendor = item.vendorId;
@@ -150,14 +159,17 @@ export const getMobileDeals = async (req, res) => {
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const total = await Deal.countDocuments(filter);
     const deals = await Deal.find(filter)
-      .populate({ path: "vendorId", select: "location.coordinates" })
+      .populate({
+        path: "vendorId",
+        select: "companyName location.coordinates location.businessName",
+      })
       .sort(sort)
       .skip(skip)
       .limit(parseInt(limit));
 
     res.status(200).json({
       success: true,
-      data: deals.map(withVendorLocation),
+      data: deals.map(withDealVenueInfo),
       pagination: {
         total,
         page: parseInt(page),
