@@ -9,6 +9,7 @@ import {
   updateVenueDetails,
   vendorLogout,
 } from "../controller/vendorController.js";
+import { endImpersonation } from "../controller/adminController.js";
 import { protect, authenticate } from "../middleware/auth.js";
 
 const router = express.Router();
@@ -25,5 +26,8 @@ router.get("/profile", protect, getCurrentVendor);
 router.get("/venue-details", protect, getVenueDetails);
 router.put("/venue-details", protect, updateVenueDetails);
 router.post("/logout", protect, vendorLogout);
+
+// Impersonation route
+router.post("/impersonate/end", protect, endImpersonation);
 
 export default router;

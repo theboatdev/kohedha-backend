@@ -6,10 +6,11 @@ import {
   updateSection,
   deleteSection,
 } from "../controller/sectionController.js";
-import { protect } from "../middleware/auth.js";
+import { protect, auditWrites } from "../middleware/auth.js";
 
 const router = express.Router();
 router.use(protect);
+router.use(auditWrites);
 
 router.get("/", getSections);
 router.get("/:id", getSectionById);

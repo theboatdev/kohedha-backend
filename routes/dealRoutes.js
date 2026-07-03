@@ -7,12 +7,13 @@ import {
   deleteDeal,
   getDealsByCategory,
 } from "../controller/dealController.js";
-import { protect } from "../middleware/auth.js";
+import { protect, auditWrites } from "../middleware/auth.js";
 import { uploadDealImage } from "../middleware/upload.js";
 
 const router = express.Router();
 
 router.use(protect);
+router.use(auditWrites);
 
 // CRUD routes
 router.post("/new", uploadDealImage.single("image"), createDeal);

@@ -17,12 +17,10 @@ const auditLogSchema = new mongoose.Schema(
       required: true, // impersonation.start, impersonation.end,..
     },
     method: {
-      type: String,
-      required: true, // GET, POST, PUT, DELETE
+      type: String, // GET, POST, PUT, DELETE - not set for impersonation.start/end
     },
     path: {
-      type: String,
-      required: true, // req.originalUrl
+      type: String, // req.originalUrl - not set for impersonation.start/end
     },
     statusCode: {
       type: Number,

@@ -6,12 +6,13 @@ import {
   updateEvent,
   deleteEvent,
 } from "../controller/eventController.js";
-import { protect } from "../middleware/auth.js";
+import { protect, auditWrites } from "../middleware/auth.js";
 import { uploadEventImages } from "../middleware/upload.js";
 
 const router = express.Router();
 
 router.use(protect);
+router.use(auditWrites);
 
 router.post("/new", uploadEventImages.single("images"), createEvent);
 router.get("/", getVendorEvents);

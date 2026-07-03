@@ -11,11 +11,12 @@ import {
   saveEditedPDFMenuItems,
   getMenuVoteSummary,
 } from "../controller/menuController.js";
-import { protect } from "../middleware/auth.js";
+import { protect, auditWrites } from "../middleware/auth.js";
 
 const router = express.Router();
 
 router.use(protect);
+router.use(auditWrites);
 
 // Single item creation (with optional image)
 router.post("/create", uploadMenuImage.single("image"), createMenuItem);

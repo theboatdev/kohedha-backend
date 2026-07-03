@@ -7,11 +7,12 @@ import {
   deleteTable,
   updateTablePositions,
 } from "../controller/tableController.js";
-import { protect } from "../middleware/auth.js";
+import { protect, auditWrites } from "../middleware/auth.js";
 
 const router = express.Router();
 
 router.use(protect);
+router.use(auditWrites);
 
 // Main CRUD routes
 router.get("/", getTables);
