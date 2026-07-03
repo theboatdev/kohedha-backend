@@ -83,3 +83,14 @@ export const sendAdminTokenResponse = (
       token,
     });
 };
+// Impersonation token - carries BOTH identities:
+//  - `id`: the target vendor's id (so every existing req.vendor.id check
+//    in controllers keeps working unmodified)
+//  - `adminId`: who is actually driving the session (for audit + banner)
+export const generateImpersonationToken = (vendorID, adminId) => {
+  return jwt.sign(
+    { type: "impersonation", id: vendorID, adminId, impersonating: true },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.IMPERSONATION_JWT_EXPIRE || "1h" },
+  );
+};

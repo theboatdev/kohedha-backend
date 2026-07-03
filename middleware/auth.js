@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
 import Vendor from "../models/vendorModel.js";
 import Admin from "../models/adminModel.js";
+import AuditLog from "../models/auditLogModel.js"
 
 // Basic auth - allows incomplete registration
 export const authenticate = async (req, res, next) => {
@@ -31,6 +32,13 @@ export const authenticate = async (req, res, next) => {
         success: false,
         message: "User not found",
       });
+    }
+
+    if (decoded.type === "impersonation") {
+      req.impersonation = {
+        isImpersonating: true,
+        adminId: decoded.adminId,
+      };
     }
 
     next();
@@ -169,6 +177,13 @@ export const protect = async (req, res, next) => {
       });
     }
 
+    if (decoded.type === "impersonation") {
+      req.impersonation = {
+        isImpersonating: true,
+        adminId: decoded.adminId,
+      };
+    }
+
     next();
   } catch (error) {
     console.error("Auth middleware error:", error);
@@ -192,4 +207,23 @@ export const protect = async (req, res, next) => {
       message: "Not authorized",
     });
   }
+};
+
+// Logs mutating requests made while an admin is impersonating a vendor.
+// Must run AFTER `protect`/`authenticate` (needs req.vendor + req.impersonation).
+export const auditWrites = (req, res, next) => {
+  if (!req.impersonation?.isImpersonating || req.method === "GET") {
+    return next();
+  }
+  res.on("finish", () => {
+    AuditLog.create({
+      adminId: req.impersonation.adminId,
+      vendorId: req.vendor._id,
+      action: "request",
+      method: req.method,
+      path: req.originalUrl,
+      statusCode: res.statusCode,
+    }).catch((err) => console.error("Failed to write audit log:", err));
+  });
+  next();
 };
