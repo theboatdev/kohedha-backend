@@ -1,14 +1,54 @@
 import jwt from "jsonwebtoken";
 import Vendor from "../models/vendorModel.js";
 import Admin from "../models/adminModel.js";
-import AuditLog from "../models/auditLogModel.js"
+import AuditLog from "../models/auditLogModel.js";
+import ImpersonationSession from "../models/impersonationSessionModel.js";
+import { getImpersonationJwtSecret } from "../utils/jwtToken.js";
+
+// Impersonation tokens are signed with their own secret (see jwtToken.js),
+// so they can be rotated/invalidated independently of vendor/admin sessions.
+// We can't know a token's type without decoding it first, and decoding
+// (unlike verifying) doesn't check the signature, so this peek is safe -
+// the actual signature check still happens in `jwt.verify` below with the
+// secret picked here.
+const verifyAuthToken = (token) => {
+  const unverified = jwt.decode(token);
+  const secret =
+    unverified?.type === "impersonation"
+      ? getImpersonationJwtSecret()
+      : process.env.JWT_SECRET;
+  return jwt.verify(token, secret);
+};
+
+/* Shared by `authenticate` and `protect`: once a token decodes as an
+impersonation token, confirm the underlying session hasn't been revoked
+ (via `endImpersonation`) or otherwise made inactive. Without this check
+ a "ended" impersonation JWT would stay usable until it naturally expires. */
+const loadActiveImpersonationSession = async (decoded) => {
+  if (decoded.type !== "impersonation") return null;
+
+  const session = await ImpersonationSession.findOne({
+    jti: decoded.jti,
+    active: true,
+  });
+
+  if (!session) {
+    const err = new Error("Impersonation session has been ended");
+    err.name = "ImpersonationRevokedError";
+    throw err;
+  }
+
+  return { isImpersonating: true, adminId: decoded.adminId, jti: decoded.jti };
+};
 
 // Basic auth - allows incomplete registration
 export const authenticate = async (req, res, next) => {
   try {
     let token;
 
-    if (req.cookies.token) {
+    if (req.cookies.impersonation_token) {
+      token = req.cookies.impersonation_token;
+    } else if (req.cookies.token) {
       token = req.cookies.token;
     } else if (
       req.headers.authorization &&
@@ -24,7 +64,7 @@ export const authenticate = async (req, res, next) => {
       });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = verifyAuthToken(token);
     req.vendor = await Vendor.findById(decoded.id).select("-password");
 
     if (!req.vendor) {
@@ -34,12 +74,7 @@ export const authenticate = async (req, res, next) => {
       });
     }
 
-    if (decoded.type === "impersonation") {
-      req.impersonation = {
-        isImpersonating: true,
-        adminId: decoded.adminId,
-      };
-    }
+    req.impersonation = await loadActiveImpersonationSession(decoded);
 
     next();
   } catch (error) {
@@ -56,6 +91,13 @@ export const authenticate = async (req, res, next) => {
       return res.status(401).json({
         success: false,
         message: "Token expired",
+      });
+    }
+
+    if (error.name === "ImpersonationRevokedError") {
+      return res.status(401).json({
+        success: false,
+        message: "Impersonation session has ended, please log in again",
       });
     }
 
@@ -142,7 +184,9 @@ export const protect = async (req, res, next) => {
   try {
     let token;
 
-    if (req.cookies.token) {
+    if (req.cookies.impersonation_token) {
+      token = req.cookies.impersonation_token;
+    } else if (req.cookies.token) {
       token = req.cookies.token;
     } else if (
       req.headers.authorization &&
@@ -158,7 +202,7 @@ export const protect = async (req, res, next) => {
       });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = verifyAuthToken(token);
     req.vendor = await Vendor.findById(decoded.id).select("-password");
 
     if (!req.vendor) {
@@ -177,12 +221,7 @@ export const protect = async (req, res, next) => {
       });
     }
 
-    if (decoded.type === "impersonation") {
-      req.impersonation = {
-        isImpersonating: true,
-        adminId: decoded.adminId,
-      };
-    }
+    req.impersonation = await loadActiveImpersonationSession(decoded);
 
     next();
   } catch (error) {
@@ -202,10 +241,41 @@ export const protect = async (req, res, next) => {
       });
     }
 
+    if (error.name === "ImpersonationRevokedError") {
+      return res.status(401).json({
+        success: false,
+        message: "Impersonation session has ended, please log in again",
+      });
+    }
+
     return res.status(401).json({
       success: false,
       message: "Not authorized",
     });
+  }
+};
+
+// Best-effort: audit writes must never crash the request they're logging,
+// so failures here can only be handled after the fact (retry + loud log).
+// Wire `onCriticalAuditFailure` up to a real alerting channel (Sentry/Slack/
+// PagerDuty/etc.) - as-is it's a single choke point that's easy to extend
+// without touching every call site.
+const onCriticalAuditFailure = (entry, error) => {
+  console.error(
+    "CRITICAL: audit log write failed after retries - impersonated action was NOT recorded:",
+    JSON.stringify(entry),
+    error,
+  );
+};
+
+const createAuditLogWithRetry = async (entry, attemptsLeft = 2) => {
+  try {
+    await AuditLog.create(entry);
+  } catch (error) {
+    if (attemptsLeft > 1) {
+      return createAuditLogWithRetry(entry, attemptsLeft - 1);
+    }
+    onCriticalAuditFailure(entry, error);
   }
 };
 
@@ -216,14 +286,14 @@ export const auditWrites = (req, res, next) => {
     return next();
   }
   res.on("finish", () => {
-    AuditLog.create({
+    createAuditLogWithRetry({
       adminId: req.impersonation.adminId,
       vendorId: req.vendor._id,
       action: "request",
       method: req.method,
       path: req.originalUrl,
       statusCode: res.statusCode,
-    }).catch((err) => console.error("Failed to write audit log:", err));
+    });
   });
   next();
 };

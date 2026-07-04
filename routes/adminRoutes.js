@@ -5,6 +5,7 @@ import {
   getCurrentAdmin,
   listVendors,
   startImpersonation,
+  listAuditLogs,
 } from "../controller/adminController.js";
 import { requireAdmin } from "../middleware/auth.js";
 
@@ -18,5 +19,6 @@ router.get("/me", requireAdmin, getCurrentAdmin);
 router.post("/logout", requireAdmin, adminLogout);
 router.get("/vendors", requireAdmin, listVendors);
 router.post("/vendors/:id/impersonate", requireAdmin, startImpersonation);
+router.get("/audit-logs", requireAdmin, listAuditLogs);
 
 export default router;

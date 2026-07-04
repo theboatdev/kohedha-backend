@@ -83,14 +83,24 @@ export const sendAdminTokenResponse = (
       token,
     });
 };
+// Read at call time — env vars aren't available when this module is first
+// imported (dotenv runs after ES module imports in app.js).
+export const getImpersonationJwtSecret = () =>
+  process.env.IMPERSONATION_JWT_SECRET || process.env.JWT_SECRET;
+
 // Impersonation token - carries BOTH identities:
 //  - `id`: the target vendor's id (so every existing req.vendor.id check
 //    in controllers keeps working unmodified)
 //  - `adminId`: who is actually driving the session (for audit + banner)
-export const generateImpersonationToken = (vendorID, adminId) => {
+//  - `jti`: unique session id checked against ImpersonationSession on every
+//    request, so the session can be revoked server-side (JWTs alone can't
+//    be invalidated before they naturally expire)
+export const generateImpersonationToken = (vendorId, adminId, jti) => {
   return jwt.sign(
-    { type: "impersonation", id: vendorID, adminId, impersonating: true },
-    process.env.JWT_SECRET,
-    { expiresIn: process.env.IMPERSONATION_JWT_EXPIRE || "1h" },
+    { type: "impersonation", id: vendorId, adminId, jti },
+    getImpersonationJwtSecret(),
+    {
+      expiresIn: process.env.IMPERSONATION_JWT_EXPIRE || "1h",
+    },
   );
 };
