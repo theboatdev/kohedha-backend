@@ -6,6 +6,8 @@ import Admin from "../models/adminModel.js";
 import AuditLog from "../models/auditLogModel.js";
 import Vendor from "../models/vendorModel.js";
 import ImpersonationSession from "../models/impersonationSessionModel.js";
+import Event from "../models/eventModel.js";
+import MobileUser from "../models/mobileUserModel.js";
 import {
   sendAdminTokenResponse,
   generateImpersonationToken,
@@ -215,23 +217,26 @@ export const startImpersonation = async (req, res) => {
       metadata: req.body?.reason ? { reason: req.body.reason } : undefined,
     });
 
-    // Set as an httpOnly cookie (preferred, XSS-resistant) in addition to
-    // returning it in the body (kept for clients that can't rely on cookies,
-    // e.g. a separate-origin admin SPA embedding the vendor app). Frontends
-    // that can use the cookie should avoid persisting the body token in JS
-    // state (localStorage, memory) to get the httpOnly protection.
-    res.cookie("impersonation_token", token, {
+    // Set impersonation token as HttpOnly cookie
+    // In production, use domain: '.yourdomain.com' to share across subdomains
+    const cookieOptions = {
       expires: new Date(exp * 1000),
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
       path: "/",
-    });
+    };
+
+    // Add domain for same-domain deployments (e.g., admin.kohedha.com, vendor.kohedha.com)
+    if (process.env.COOKIE_DOMAIN) {
+      cookieOptions.domain = process.env.COOKIE_DOMAIN; // e.g., '.kohedha.com'
+    }
+
+    res.cookie("impersonation_token", token, cookieOptions);
 
     res.status(200).json({
       success: true,
       message: `Impersonation session started for ${vendor.email}`,
-      impersonationToken: token,
       data: {
         _id: vendor._id,
         email: vendor.email,
@@ -294,6 +299,122 @@ export const endImpersonation = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to end impersonation",
+      error: error.message,
+    });
+  }
+};
+
+// GET /api/admin/impersonation-sessions/active
+// Lists all active impersonation sessions (called with admin token)
+export const getActiveSessions = async (req, res) => {
+  try {
+    const sessions = await ImpersonationSession.find({ active: true })
+      .populate("adminId", "name email")
+      .populate("vendorId", "email companyName")
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      data: sessions,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch active sessions",
+      error: error.message,
+    });
+  }
+};
+
+// GET /api/admin/dashboard/stats
+// Returns dashboard statistics
+export const getDashboardStats = async (req, res) => {
+  try {
+    const [
+      totalVendors,
+      activeSessions,
+      totalEvents,
+      totalMobileUsers,
+      recentImpersonations,
+    ] = await Promise.all([
+      Vendor.countDocuments(),
+      ImpersonationSession.countDocuments({ active: true }),
+      Event.countDocuments(),
+      MobileUser.countDocuments(),
+      AuditLog.countDocuments({
+        action: { $in: ["impersonation.start", "impersonation.end", "impersonation.force-end"] },
+      }),
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        totalVendors,
+        activeSessions,
+        totalEvents,
+        totalMobileUsers,
+        recentImpersonations,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch dashboard stats",
+      error: error.message,
+    });
+  }
+};
+
+// POST /api/admin/impersonation-sessions/:sessionId/end
+// Force-ends an active impersonation session (called with admin token)
+export const forceEndImpersonation = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(sessionId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid session ID",
+      });
+    }
+
+    const session = await ImpersonationSession.findOneAndUpdate(
+      { _id: sessionId, active: true },
+      {
+        active: false,
+        endedAt: new Date(),
+        endedBy: "admin-force",
+      },
+      { new: false } // Return the original document before update
+    );
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: "No active session found with that ID",
+      });
+    }
+
+    // Create audit log for the force-end action
+    await AuditLog.create({
+      adminId: req.admin._id,
+      vendorId: session.vendorId,
+      action: "impersonation.force-end",
+      metadata: {
+        sessionId: session._id,
+        forcedBy: req.admin.email,
+        originalAdminId: session.adminId,
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Impersonation session force-ended successfully",
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to end session",
       error: error.message,
     });
   }

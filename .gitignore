@@ -23,7 +23,7 @@ dist/
 build/
 tmp/
 temp/
-
+/AdminFrontend
 # IDEs and editors
 .vscode/
 .idea/
