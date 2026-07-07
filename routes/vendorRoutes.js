@@ -8,6 +8,7 @@ import {
   getVenueDetails,
   updateVenueDetails,
   vendorLogout,
+  getImpersonationStatus,
 } from "../controller/vendorController.js";
 import { endImpersonation } from "../controller/adminController.js";
 import { protect, authenticate, auditWrites } from "../middleware/auth.js";
@@ -32,8 +33,9 @@ router.get("/venue-details", protect, getVenueDetails);
 router.put("/venue-details", protect, auditWrites, updateVenueDetails);
 router.post("/logout", protect, vendorLogout);
 
-// Impersonation route - uses `authenticate` (not `protect`) so a session can
-// always be ended even if the impersonated vendor hasn't completed onboarding.
+// Impersonation routes - use `authenticate` (not `protect`) so they work
+// even if the impersonated vendor hasn't completed onboarding.
+router.get("/impersonation-status", authenticate, getImpersonationStatus);
 router.post("/impersonate/end", authenticate, endImpersonation);
 
 export default router;

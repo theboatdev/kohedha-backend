@@ -527,3 +527,35 @@ export const updateVenueDetails = async (req, res) => {
     });
   }
 };
+
+
+// GET /api/vendor/impersonation-status
+// Returns whether the current session is an impersonation session
+export const getImpersonationStatus = async (req, res) => {
+  try {
+    if (req.impersonation?.isImpersonating) {
+      // Import Admin model
+      const Admin = (await import("../models/adminModel.js")).default;
+      const admin = await Admin.findById(req.impersonation.adminId).select('name email');
+      
+      return res.json({
+        success: true,
+        isImpersonating: true,
+        adminEmail: admin?.email,
+        adminName: admin?.name,
+        vendorEmail: req.vendor?.email,
+      });
+    }
+
+    res.json({
+      success: true,
+      isImpersonating: false,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to check impersonation status",
+      error: error.message,
+    });
+  }
+};

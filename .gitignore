@@ -24,6 +24,7 @@ build/
 tmp/
 temp/
 /AdminFrontend
+/Vendor-frontend
 # IDEs and editors
 .vscode/
 .idea/
