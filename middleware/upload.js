@@ -110,4 +110,25 @@ export const uploadDealImage = multer({
   limits: { fileSize: 5 * 1024 * 1024, files: 1 }, // 5 MB, max 1 file
 });
 
+// Cloudinary storage (mmr-rally check-in images — public endpoint, no auth)
+const rallyImageStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: "koheda/mmr-rally",
+    allowed_formats: ["jpg", "jpeg", "png", "webp"],
+    transformation: [{ width: 1600, height: 1600, crop: "limit" }],
+    public_id: (_req, file) => {
+      const short = Math.random().toString(36).slice(2, 8);
+      const timestamp = Date.now();
+      return `rally-${timestamp}-${short}`;
+    },
+  },
+});
+
+export const uploadRallyImages = multer({
+  storage: rallyImageStorage,
+  fileFilter: imageFilter,
+  limits: { fileSize: 8 * 1024 * 1024, files: 5 }, // 8 MB per file, max 5 files
+});
+
 export default upload;

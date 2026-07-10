@@ -24,6 +24,7 @@ import dashboardRoutes from "./routes/dashboardRoutes.js";
 import mobileRoutes from "./routes/mobileRoutes.js";
 import waitlistRoutes from "./routes/waitlistRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
+import mmrRallyRoutes from "./routes/mmrRallyRoutes.js";
 
 const app = express();
 const port = process.env.PORT || 5002;
@@ -62,6 +63,7 @@ app.use("/api/vendor/deals", dealRoutes);
 app.use("/api/vendor/dashboard", dashboardRoutes);
 app.use("/api/mobile", mobileRoutes);
 app.use("/api/public/wait-list", waitlistRoutes);
+app.use("/api/public/mmr-rally", mmrRallyRoutes);
 app.use("/api/admin", adminRoutes);
 
 app.listen(port, () => console.log(`Server running on port ${port}`));
