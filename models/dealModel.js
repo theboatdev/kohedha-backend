@@ -138,7 +138,14 @@ const dealSchema = mongoose.Schema(
     isPublished: {
       type: Boolean,
       default: false,
-    }, 
+    },
+
+    dealType: {
+      type: String,
+      enum: ["regular", "mmr-rally-special"],
+      default: "regular",
+      required: true,
+    },
   },
   { timestamps: true },
 );
