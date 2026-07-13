@@ -146,6 +146,18 @@ const dealSchema = mongoose.Schema(
       default: "regular",
       required: true,
     },
+
+    question: {
+      type: String,
+      trim: true,
+      maxlength: [500, "Question cannot exceed 500 characters"],
+    },
+
+    // Checkpoint number for mmr-rally-special deals (1, 2 or 3)
+    rallyLocation: {
+      type: Number,
+      enum: [1, 2, 3],
+    },
   },
   { timestamps: true },
 );
@@ -159,6 +171,7 @@ dealSchema.index({ status: 1, isPublished: 1 });
 dealSchema.index({ priority: 1, status: 1 });
 dealSchema.index({ tags: 1 });
 dealSchema.index({ publishedAt: -1 });
+dealSchema.index({ dealType: 1, rallyLocation: 1, isPublished: 1 });
 
 const Deal = mongoose.model("Deal", dealSchema);
 

@@ -41,6 +41,8 @@ export const createDeal = async (req, res) => {
       startDate,
       endDate,
       dealType,
+      question,
+      rallyLocation,
     } = req.body;
 
     let tags = rawTags;
@@ -87,6 +89,8 @@ export const createDeal = async (req, res) => {
       startDate: startDate ? new Date(startDate) : null,
       endDate: endDate ? new Date(endDate) : null,
       dealType: dealType || "regular",
+      question: question || "",
+      rallyLocation: rallyLocation ? parseInt(rallyLocation, 10) : undefined,
     });
 
     console.log(
@@ -255,6 +259,8 @@ export const updateDeal = async (req, res) => {
       startDate,
       endDate,
       dealType,
+      question,
+      rallyLocation,
     } = req.body;
 
     let tags = rawTags;
@@ -280,6 +286,9 @@ export const updateDeal = async (req, res) => {
     if (endDate !== undefined)
       deal.endDate = endDate ? new Date(endDate) : null;
     if (dealType) deal.dealType = dealType;
+    if (question !== undefined) deal.question = question;
+    if (rallyLocation !== undefined)
+      deal.rallyLocation = rallyLocation ? parseInt(rallyLocation, 10) : undefined;
 
     // Handle image update
     if (req.file) {
