@@ -954,27 +954,19 @@ export const getMobileAvailableTables = async (req, res) => {
 };
 
 // POST /api/mobile/qr-scan
-// Body: { location: 1|2|3, token: "<base64>" }
+// Body: { location: 1|2|3, token: "<plain-text QR_SCAN_TOKEN>" }
 // Verifies the QR token, finds the published mmr-rally-special deal for that
 // checkpoint, and returns its question.
 export const scanQrCode = async (req, res) => {
   try {
-    const { location: rawLocation, token: rawToken } = req.body;
+    const { location: rawLocation, token } = req.body;
 
-    if (!rawToken) {
+    if (!token) {
       return res.status(401).json({ success: false, message: "Token is required." });
     }
 
-    // Decode and verify the base64 QR token
-    let decodedToken;
-    try {
-      decodedToken = Buffer.from(rawToken, "base64").toString("utf8");
-    } catch {
-      return res.status(401).json({ success: false, message: "Invalid token format." });
-    }
-
     const expectedToken = process.env.QR_SCAN_TOKEN;
-    if (!expectedToken || decodedToken !== expectedToken) {
+    if (!expectedToken || token !== expectedToken) {
       return res.status(401).json({ success: false, message: "Invalid or unauthorized token." });
     }
 
