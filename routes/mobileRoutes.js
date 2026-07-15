@@ -16,6 +16,8 @@ import {
   getMobileBookingSlotsByVendor,
   getMobileAvailableDates,
   getMobileAvailableTables,
+  scanQrCode,
+  submitRallyAnswer,
 } from "../controller/mobileController.js";
 
 const router = express.Router();
@@ -30,6 +32,12 @@ router.get("/events/:id", getMobileEventById);
 // Deals
 router.get("/deals", getMobileDeals);
 router.get("/deals/:id", getMobileDealById);
+
+// QR scan — verify token and return the question for the scanned checkpoint
+router.post("/qr-scan", scanQrCode);
+
+// Rally submission — save driver's answer for a checkpoint question
+router.post("/rally-submission", submitRallyAnswer);
 
 // Menu item voting
 router.post("/menu/:menuItemId/vote", voteOnMenuItem);
