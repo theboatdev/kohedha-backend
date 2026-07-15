@@ -7,6 +7,7 @@ import MobileUser from "../models/mobileUserModel.js";
 import BookingSlot from "../models/bookingSlotModel.js";
 import Table from "../models/tableModel.js";
 import Reservation from "../models/reservationModel.js";
+import RallySubmission from "../models/rallySubmissionModel.js";
 import { generateOccurrences } from "../utils/recurrenceUtils.js";
 
 function withVendorLocation(doc) {
@@ -949,6 +950,143 @@ export const getMobileAvailableTables = async (req, res) => {
   } catch (error) {
     console.error("[Mobile] Error fetching available tables:", error.message);
     res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+// POST /api/mobile/qr-scan
+// Body: { location: 1|2|3, token: "<plain-text QR_SCAN_TOKEN>" }
+// Verifies the QR token, finds the published mmr-rally-special deal for that
+// checkpoint, and returns its question.
+export const scanQrCode = async (req, res) => {
+  try {
+    const { location: rawLocation, token } = req.body;
+
+    if (!token) {
+      return res.status(401).json({ success: false, message: "Token is required." });
+    }
+
+    const expectedToken = process.env.QR_SCAN_TOKEN;
+    if (!expectedToken || token !== expectedToken) {
+      return res.status(401).json({ success: false, message: "Invalid or unauthorized token." });
+    }
+
+    // Validate location
+    const location = parseInt(rawLocation, 10);
+    if (!Number.isFinite(location) || ![1, 2, 3].includes(location)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid checkpoint location. Must be 1, 2, or 3.",
+      });
+    }
+
+    // Find the published mmr-rally-special deal for this checkpoint
+    const deal = await Deal.findOne({
+      dealType: "mmr-rally-special",
+      rallyLocation: location,
+      isPublished: true,
+    }).select("dealName question rallyLocation");
+
+    if (!deal) {
+      return res.status(404).json({
+        success: false,
+        message: `No active question found for checkpoint ${location}.`,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        location,
+        dealId: deal._id,
+        dealName: deal.dealName,
+        question: deal.question || null,
+      },
+    });
+  } catch (error) {
+    console.error("[Mobile QR Scan] Error:", error.message);
+    return res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+// POST /api/mobile/rally-submission
+// Body: { dealId, location, driverId, driverName, answer }
+// Saves the user's answer for a rally checkpoint question.
+export const submitRallyAnswer = async (req, res) => {
+  try {
+    const { dealId, location: rawLocation, driverId, driverName, answer } = req.body;
+
+    // Required field validation
+    if (!dealId || !rawLocation || !driverId || !driverName || !answer) {
+      return res.status(400).json({
+        success: false,
+        message: "dealId, location, driverId, driverName, and answer are all required.",
+      });
+    }
+
+    const location = parseInt(rawLocation, 10);
+    if (!Number.isFinite(location) || ![1, 2, 3].includes(location)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid checkpoint location. Must be 1, 2, or 3.",
+      });
+    }
+
+    if (!mongoose.isValidObjectId(dealId)) {
+      return res.status(400).json({ success: false, message: "Invalid deal ID." });
+    }
+
+    // Confirm the deal exists and belongs to this checkpoint
+    const deal = await Deal.findOne({
+      _id: dealId,
+      dealType: "mmr-rally-special",
+      rallyLocation: location,
+      isPublished: true,
+    }).select("question");
+
+    if (!deal) {
+      return res.status(404).json({
+        success: false,
+        message: "Rally deal not found for the given location.",
+      });
+    }
+
+    if (!deal.question) {
+      return res.status(400).json({
+        success: false,
+        message: "This deal does not have a question set yet.",
+      });
+    }
+
+    const submission = await RallySubmission.create({
+      location,
+      dealId: deal._id,
+      driverId: driverId.trim(),
+      driverName: driverName.trim(),
+      question: deal.question,
+      answer: answer.trim(),
+      submittedBy: req.user.uid,
+    });
+
+    console.log(
+      `[Rally Submission] Saved submission ${submission._id} for location ${location}, driver ${driverId}`,
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: "Answer submitted successfully.",
+      data: {
+        id: submission._id,
+        location: submission.location,
+        driverId: submission.driverId,
+        driverName: submission.driverName,
+        question: submission.question,
+        answer: submission.answer,
+        submittedAt: submission.createdAt,
+      },
+    });
+  } catch (error) {
+    console.error("[Rally Submission] Error:", error.message);
+    return res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
 
