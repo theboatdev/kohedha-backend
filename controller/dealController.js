@@ -64,6 +64,17 @@ export const createDeal = async (req, res) => {
       });
     }
 
+    if (dealType === "mmr-rally-special") {
+      const parsedLocation = parseInt(rallyLocation, 10);
+      if (![1, 2, 3].includes(parsedLocation)) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "rallyLocation (1, 2, or 3) is required for mmr-rally-special deals",
+        });
+      }
+    }
+
     // Build mainImage: prefer uploaded file, fallback to body value
     let resolvedMainImage = mainImage || null;
     if (req.file) {
@@ -314,6 +325,17 @@ export const updateDeal = async (req, res) => {
       if (isPublished && !deal.publishedAt) {
         deal.publishedAt = new Date();
       }
+    }
+
+    if (
+      deal.dealType === "mmr-rally-special" &&
+      ![1, 2, 3].includes(deal.rallyLocation)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "rallyLocation (1, 2, or 3) is required for mmr-rally-special deals",
+      });
     }
 
     const updatedDeal = await deal.save();
