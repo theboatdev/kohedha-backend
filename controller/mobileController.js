@@ -417,6 +417,22 @@ export const saveUserProfile = async (req, res) => {
     // Return existing profile if one already exists for this UID
     const existing = await MobileUser.findOne({ firebaseUid: uid });
     if (existing) {
+      // Reactivate a previously soft-deleted account instead of blocking re-signup
+      if (!existing.isActive) {
+        existing.isActive = true;
+        existing.deletedAt = null;
+        existing.fullName = fullName.trim();
+        existing.email = resolvedEmail;
+        if (Array.isArray(vibes)) existing.vibes = vibes;
+        await existing.save();
+
+        return res.status(200).json({
+          success: true,
+          message: "Profile reactivated successfully",
+          data: existing,
+        });
+      }
+
       return res.status(200).json({
         success: true,
         message: "Profile already exists",
@@ -466,7 +482,7 @@ export const getMobileUserByEmail = async (req, res) => {
       });
     }
 
-    const user = await MobileUser.findOne({ email: normalizedEmail });
+    const user = await MobileUser.findOne({ email: normalizedEmail, isActive: true });
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -702,7 +718,7 @@ export const updateUserProfile = async (req, res) => {
       });
     }
 
-    const user = await MobileUser.findOne({ firebaseUid: uid });
+    const user = await MobileUser.findOne({ firebaseUid: uid, isActive: true });
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -726,6 +742,39 @@ export const updateUserProfile = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message || "Error updating user profile",
+    });
+  }
+};
+
+// DELETE /api/mobile/user/profile
+// Soft-deletes (deactivates) the authenticated user's account.
+// The record is kept (isActive: false, deletedAt set) 
+// Re-signing up via saveUserProfile reactivates the same record.
+export const deleteUserAccount = async (req, res) => {
+  try {
+    const { uid } = req.user;
+
+    const user = await MobileUser.findOne({ firebaseUid: uid, isActive: true });
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User profile not found",
+      });
+    }
+
+    user.isActive = false;
+    user.deletedAt = new Date();
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Account deleted successfully",
+    });
+  } catch (error) {
+    console.error("[Mobile] Error deleting user account:", error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Error deleting user account",
     });
   }
 };
