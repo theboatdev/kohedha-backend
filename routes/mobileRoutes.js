@@ -10,6 +10,7 @@ import {
   getMobileVenues,
   saveUserProfile,
   updateUserProfile,
+  deleteUserAccount,
   getMobileUserByEmail,
   voteOnMenuItem,
   getMobileBookingSlots,
@@ -61,5 +62,6 @@ router.get("/:vendorId/booking-slots", getMobileBookingSlotsByVendor);
 router.get("/user", getMobileUserByEmail);
 router.post("/user/profile", saveUserProfile);
 router.put("/user/profile", updateUserProfile);
+router.delete("/user/profile", deleteUserAccount);
 
 export default router;
