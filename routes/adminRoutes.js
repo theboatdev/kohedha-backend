@@ -6,8 +6,9 @@ import {
   createAdmin,
   getAllAdmins,
   toggleAdminStatus,
+  getRallySubmissions,
 } from "../controller/adminController.js";
-import { requireAdmin, requireSuperAdmin } from "../middleware/auth.js";
+import { requireAdmin, requireSuperAdmin, requireMmrAccess } from "../middleware/auth.js";
 
 const router = express.Router();
 
@@ -22,5 +23,8 @@ router.post("/logout", requireAdmin, adminLogout);
 router.post("/admins", requireAdmin, requireSuperAdmin, createAdmin);
 router.get("/admins", requireAdmin, requireSuperAdmin, getAllAdmins);
 router.patch("/admins/:id/status", requireAdmin, requireSuperAdmin, toggleAdminStatus);
+
+// MMR routes (super_admin + mmr_admin)
+router.get("/mmr/submissions", requireAdmin, requireMmrAccess, getRallySubmissions);
 
 export default router;

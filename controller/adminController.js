@@ -1,5 +1,6 @@
 import bcrypt from "bcrypt";
 import Admin from "../models/adminModel.js";
+import RallySubmission from "../models/rallySubmissionModel.js";
 import { sendAdminTokenResponse } from "../utils/jwtToken.js";
 
 // Admin login
@@ -189,6 +190,61 @@ export const toggleAdminStatus = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to update admin status",
+      error: error.message,
+    });
+  }
+};
+
+// Get MMR rally submissions (super_admin + mmr_admin)
+// Optional query params: location=1|2|3, page, limit
+export const getRallySubmissions = async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
+    const skip = (page - 1) * limit;
+
+    const filter = {};
+    if (req.query.location) {
+      const loc = parseInt(req.query.location);
+      if ([1, 2, 3].includes(loc)) {
+        filter.location = loc;
+      }
+    }
+
+    const [submissions, total] = await Promise.all([
+      RallySubmission.find(filter)
+        .populate("dealId", "dealName rallyLocation")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      RallySubmission.countDocuments(filter),
+    ]);
+
+    // Per-checkpoint counts for summary stats
+    const checkpointCounts = await RallySubmission.aggregate([
+      { $group: { _id: "$location", count: { $sum: 1 } } },
+      { $sort: { _id: 1 } },
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: submissions,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+      checkpointStats: checkpointCounts.reduce((acc, c) => {
+        acc[c._id] = c.count;
+        return acc;
+      }, {}),
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch rally submissions",
       error: error.message,
     });
   }
