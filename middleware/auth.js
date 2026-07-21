@@ -129,6 +129,18 @@ export const requireAdmin = async (req, res, next) => {
   }
 };
 
+// Requires the logged-in admin to have the super_admin role.
+// Must be used after requireAdmin so that req.admin is already set.
+export const requireSuperAdmin = (req, res, next) => {
+  if (req.admin?.role !== "super_admin") {
+    return res.status(403).json({
+      success: false,
+      message: "Super admin access required",
+    });
+  }
+  next();
+};
+
 // Protect - requires complete registration
 export const protect = async (req, res, next) => {
   try {

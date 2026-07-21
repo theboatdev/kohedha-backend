@@ -84,3 +84,112 @@ export const getCurrentAdmin = async (req, res) => {
     });
   }
 };
+
+// Create a new MMR admin (super_admin only)
+export const createAdmin = async (req, res) => {
+  try {
+    const { email, password, name } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and password are required",
+      });
+    }
+
+    if (password.length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 8 characters long",
+      });
+    }
+
+    const existing = await Admin.findOne({ email });
+    if (existing) {
+      return res.status(409).json({
+        success: false,
+        message: "An admin with this email already exists",
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    const admin = await Admin.create({
+      email,
+      password: hashedPassword,
+      name: name?.trim() || undefined,
+      role: "mmr_admin",
+    });
+
+    const adminData = await Admin.findById(admin._id).select("-password");
+
+    res.status(201).json({
+      success: true,
+      message: "MMR admin created successfully",
+      data: adminData,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to create admin",
+      error: error.message,
+    });
+  }
+};
+
+// List all admins (super_admin only)
+export const getAllAdmins = async (req, res) => {
+  try {
+    const admins = await Admin.find().select("-password").sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      count: admins.length,
+      data: admins,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch admins",
+      error: error.message,
+    });
+  }
+};
+
+// Toggle isActive status of an admin (super_admin only)
+export const toggleAdminStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const admin = await Admin.findById(id).select("-password");
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        message: "Admin not found",
+      });
+    }
+
+    // Prevent super_admin from deactivating themselves or other super_admins
+    if (admin.role === "super_admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Super admin accounts cannot be deactivated via this endpoint",
+      });
+    }
+
+    admin.isActive = !admin.isActive;
+    await admin.save();
+
+    res.status(200).json({
+      success: true,
+      message: `Admin ${admin.isActive ? "activated" : "deactivated"} successfully`,
+      data: admin,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to update admin status",
+      error: error.message,
+    });
+  }
+};
