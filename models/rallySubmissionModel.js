@@ -5,7 +5,7 @@ const rallySubmissionSchema = new mongoose.Schema(
     location: {
       type: Number,
       required: true,
-      enum: [1, 2, 3],
+      enum: [1, 2, 3, 4, 5, 6],
       index: true,
     },
 

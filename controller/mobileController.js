@@ -1003,7 +1003,7 @@ export const getMobileAvailableTables = async (req, res) => {
 };
 
 // POST /api/mobile/qr-scan
-// Body: { location: 1|2|3, token: "<plain-text QR_SCAN_TOKEN>" }
+// Body: { location: 1-6, token: "<plain-text QR_SCAN_TOKEN>" }
 // Verifies the QR token, finds the published mmr-rally-special deal for that
 // checkpoint, and returns its question.
 export const scanQrCode = async (req, res) => {
@@ -1021,10 +1021,10 @@ export const scanQrCode = async (req, res) => {
 
     // Validate location
     const location = parseInt(rawLocation, 10);
-    if (!Number.isFinite(location) || ![1, 2, 3].includes(location)) {
+    if (!Number.isFinite(location) || ![1, 2, 3, 4, 5, 6].includes(location)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid checkpoint location. Must be 1, 2, or 3.",
+        message: "Invalid checkpoint location. Must be between 1 and 6.",
       });
     }
 
@@ -1073,10 +1073,10 @@ export const submitRallyAnswer = async (req, res) => {
     }
 
     const location = parseInt(rawLocation, 10);
-    if (!Number.isFinite(location) || ![1, 2, 3].includes(location)) {
+    if (!Number.isFinite(location) || ![1, 2, 3, 4, 5, 6].includes(location)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid checkpoint location. Must be 1, 2, or 3.",
+        message: "Invalid checkpoint location. Must be between 1 and 6.",
       });
     }
 

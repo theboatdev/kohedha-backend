@@ -66,11 +66,11 @@ export const createDeal = async (req, res) => {
 
     if (dealType === "mmr-rally-special") {
       const parsedLocation = parseInt(rallyLocation, 10);
-      if (![1, 2, 3].includes(parsedLocation)) {
+      if (![1, 2, 3, 4, 5, 6].includes(parsedLocation)) {
         return res.status(400).json({
           success: false,
           message:
-            "rallyLocation (1, 2, or 3) is required for mmr-rally-special deals",
+            "rallyLocation (1-6) is required for mmr-rally-special deals",
         });
       }
     }
@@ -329,12 +329,12 @@ export const updateDeal = async (req, res) => {
 
     if (
       deal.dealType === "mmr-rally-special" &&
-      ![1, 2, 3].includes(deal.rallyLocation)
+      ![1, 2, 3, 4, 5, 6].includes(deal.rallyLocation)
     ) {
       return res.status(400).json({
         success: false,
         message:
-          "rallyLocation (1, 2, or 3) is required for mmr-rally-special deals",
+          "rallyLocation (1-6) is required for mmr-rally-special deals",
       });
     }
 
