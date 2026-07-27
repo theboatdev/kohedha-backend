@@ -196,7 +196,7 @@ export const toggleAdminStatus = async (req, res) => {
 };
 
 // Get MMR rally submissions (super_admin + mmr_admin)
-// Optional query params: location=1|2|3, page, limit
+// Optional query params: location=1-6, page, limit
 export const getRallySubmissions = async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
@@ -206,7 +206,7 @@ export const getRallySubmissions = async (req, res) => {
     const filter = {};
     if (req.query.location) {
       const loc = parseInt(req.query.location);
-      if ([1, 2, 3].includes(loc)) {
+      if ([1, 2, 3, 4, 5, 6].includes(loc)) {
         filter.location = loc;
       }
     }
