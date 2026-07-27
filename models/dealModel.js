@@ -153,10 +153,10 @@ const dealSchema = mongoose.Schema(
       maxlength: [500, "Question cannot exceed 500 characters"],
     },
 
-    // Checkpoint number for mmr-rally-special deals (1, 2 or 3)
+    // Checkpoint number for mmr-rally-special deals (1 through 6)
     rallyLocation: {
       type: Number,
-      enum: [1, 2, 3],
+      enum: [1, 2, 3, 4, 5, 6],
     },
   },
   { timestamps: true },
