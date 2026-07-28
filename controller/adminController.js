@@ -1,6 +1,7 @@
 import bcrypt from "bcrypt";
 import Admin from "../models/adminModel.js";
 import RallySubmission from "../models/rallySubmissionModel.js";
+import MobileUser from "../models/mobileUserModel.js";
 import { sendAdminTokenResponse } from "../utils/jwtToken.js";
 
 // Admin login
@@ -245,6 +246,59 @@ export const getRallySubmissions = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to fetch rally submissions",
+      error: error.message,
+    });
+  }
+};
+
+// Get registered mobile app users (active users only) for the MMR dashboard
+// (super_admin + mmr_admin)
+// Optional query params: search (fullName), page, limit
+export const getMobileUsers = async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
+    const skip = (page - 1) * limit;
+
+    // "Registered & active" mobile users: not soft-deleted and isActive
+    const filter = {
+      isActive: true,
+      deletedAt: null,
+    };
+
+    if (req.query.search) {
+      const search = req.query.search.trim();
+      if (search) {
+        filter.fullName = new RegExp(search, "i");
+      }
+    }
+
+    const [users, total, activeCount] = await Promise.all([
+      MobileUser.find(filter)
+        .select("-__v")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      MobileUser.countDocuments(filter),
+      MobileUser.countDocuments({ isActive: true, deletedAt: null }),
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: users,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+      activeUserCount: activeCount,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch mobile users",
       error: error.message,
     });
   }
