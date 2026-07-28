@@ -8,6 +8,8 @@ import {
   toggleAdminStatus,
   getRallySubmissions,
   getMobileUsers,
+  getMobileUsersRallyPerformance,
+  getMobileUserRallyPerformance,
 } from "../controller/adminController.js";
 import { requireAdmin, requireSuperAdmin, requireMmrAccess } from "../middleware/auth.js";
 
@@ -28,5 +30,17 @@ router.patch("/admins/:id/status", requireAdmin, requireSuperAdmin, toggleAdminS
 // MMR routes (super_admin + mmr_admin)
 router.get("/mmr/submissions", requireAdmin, requireMmrAccess, getRallySubmissions);
 router.get("/mmr/users", requireAdmin, requireMmrAccess, getMobileUsers);
+router.get(
+  "/mmr/users/rally-performance",
+  requireAdmin,
+  requireMmrAccess,
+  getMobileUsersRallyPerformance,
+);
+router.get(
+  "/mmr/users/:userId/rally-performance",
+  requireAdmin,
+  requireMmrAccess,
+  getMobileUserRallyPerformance,
+);
 
 export default router;

@@ -1,8 +1,11 @@
+import mongoose from "mongoose";
 import bcrypt from "bcrypt";
 import Admin from "../models/adminModel.js";
 import RallySubmission from "../models/rallySubmissionModel.js";
 import MobileUser from "../models/mobileUserModel.js";
 import { sendAdminTokenResponse } from "../utils/jwtToken.js";
+
+const RALLY_CHECKPOINTS = [1, 2, 3, 4, 5, 6];
 
 // Admin login
 export const adminLogin = async (req, res) => {
@@ -299,6 +302,183 @@ export const getMobileUsers = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to fetch mobile users",
+      error: error.message,
+    });
+  }
+};
+
+// Get rally submission performance for all active mobile users (MMR dashboard)
+// (super_admin + mmr_admin)
+// Optional query params: search (fullName), page, limit
+export const getMobileUsersRallyPerformance = async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
+    const skip = (page - 1) * limit;
+
+    const filter = {
+      isActive: true,
+      deletedAt: null,
+    };
+
+    if (req.query.search) {
+      const search = req.query.search.trim();
+      if (search) {
+        filter.fullName = new RegExp(search, "i");
+      }
+    }
+
+    const [users, total] = await Promise.all([
+      MobileUser.find(filter)
+        .select("fullName email firebaseUid createdAt")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      MobileUser.countDocuments(filter),
+    ]);
+
+    const firebaseUids = users.map((u) => u.firebaseUid);
+
+    // Aggregate rally stats per user for just this page of users
+    const stats = await RallySubmission.aggregate([
+      { $match: { submittedBy: { $in: firebaseUids } } },
+      {
+        $group: {
+          _id: "$submittedBy",
+          totalSubmissions: { $sum: 1 },
+          checkpoints: { $addToSet: "$location" },
+          firstSubmissionAt: { $min: "$createdAt" },
+          lastSubmissionAt: { $max: "$createdAt" },
+          latestDriverName: { $last: "$driverName" },
+        },
+      },
+    ]);
+
+    const statsByUid = stats.reduce((acc, s) => {
+      acc[s._id] = s;
+      return acc;
+    }, {});
+
+    const data = users.map((user) => {
+      const s = statsByUid[user.firebaseUid];
+      const checkpointsCompleted = s ? s.checkpoints.length : 0;
+
+      return {
+        _id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+        registeredAt: user.createdAt,
+        totalSubmissions: s ? s.totalSubmissions : 0,
+        checkpointsCompleted,
+        totalCheckpoints: RALLY_CHECKPOINTS.length,
+        completionRate: Number((checkpointsCompleted / RALLY_CHECKPOINTS.length).toFixed(2)),
+        allCheckpointsCompleted: checkpointsCompleted === RALLY_CHECKPOINTS.length,
+        missingCheckpoints: RALLY_CHECKPOINTS.filter(
+          (loc) => !(s?.checkpoints || []).includes(loc),
+        ),
+        latestDriverName: s?.latestDriverName || null,
+        firstSubmissionAt: s?.firstSubmissionAt || null,
+        lastSubmissionAt: s?.lastSubmissionAt || null,
+      };
+    });
+
+    res.status(200).json({
+      success: true,
+      data,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch rally performance",
+      error: error.message,
+    });
+  }
+};
+
+// Get detailed rally submission performance for a single mobile user
+// (super_admin + mmr_admin)
+export const getMobileUserRallyPerformance = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    if (!mongoose.isValidObjectId(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid user ID",
+      });
+    }
+
+    const user = await MobileUser.findById(userId).select("-__v").lean();
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "Mobile user not found",
+      });
+    }
+
+    const submissions = await RallySubmission.find({ submittedBy: user.firebaseUid })
+      .populate("dealId", "dealName rallyLocation")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const checkpointProgress = RALLY_CHECKPOINTS.reduce((acc, loc) => {
+      const forCheckpoint = submissions.filter((s) => s.location === loc);
+      acc[loc] = {
+        completed: forCheckpoint.length > 0,
+        submissionCount: forCheckpoint.length,
+        latestSubmission: forCheckpoint[0] || null,
+      };
+      return acc;
+    }, {});
+
+    const checkpointsCompleted = RALLY_CHECKPOINTS.filter(
+      (loc) => checkpointProgress[loc].completed,
+    ).length;
+
+    const submissionTimes = submissions.map((s) => s.createdAt);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        user: {
+          _id: user._id,
+          fullName: user.fullName,
+          email: user.email,
+          vibes: user.vibes,
+          isActive: user.isActive,
+          registeredAt: user.createdAt,
+        },
+        summary: {
+          totalSubmissions: submissions.length,
+          checkpointsCompleted,
+          totalCheckpoints: RALLY_CHECKPOINTS.length,
+          completionRate: Number(
+            (checkpointsCompleted / RALLY_CHECKPOINTS.length).toFixed(2),
+          ),
+          allCheckpointsCompleted: checkpointsCompleted === RALLY_CHECKPOINTS.length,
+          missingCheckpoints: RALLY_CHECKPOINTS.filter(
+            (loc) => !checkpointProgress[loc].completed,
+          ),
+          firstSubmissionAt: submissionTimes.length
+            ? submissionTimes[submissionTimes.length - 1]
+            : null,
+          lastSubmissionAt: submissionTimes.length ? submissionTimes[0] : null,
+        },
+        checkpointProgress,
+        submissions,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch user rally performance",
       error: error.message,
     });
   }
