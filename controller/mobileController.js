@@ -1003,9 +1003,12 @@ export const getMobileAvailableTables = async (req, res) => {
 };
 
 // POST /api/mobile/qr-scan
-// Body: { location: 1-6, token: "<plain-text QR_SCAN_TOKEN>" }
-// Verifies the QR token, finds the published mmr-rally-special deal for that
-// checkpoint, and returns its question.
+// Body: { location: 1-6, token: "<plain-text QR_SCAN_TOKEN_CP<location>>" }
+// Verifies the QR token against the token for the claimed checkpoint (each
+// checkpoint has its own dedicated token, so a token from one checkpoint's
+// QR cannot be reused to unlock another checkpoint's question), finds the
+// published mmr-rally-special deal for that checkpoint, and returns its
+// question.
 export const scanQrCode = async (req, res) => {
   try {
     const { location: rawLocation, token } = req.body;
@@ -1014,18 +1017,18 @@ export const scanQrCode = async (req, res) => {
       return res.status(401).json({ success: false, message: "Token is required." });
     }
 
-    const expectedToken = process.env.QR_SCAN_TOKEN;
-    if (!expectedToken || token !== expectedToken) {
-      return res.status(401).json({ success: false, message: "Invalid or unauthorized token." });
-    }
-
-    // Validate location
+    // Validate location first so we know which checkpoint's token to check against.
     const location = parseInt(rawLocation, 10);
     if (!Number.isFinite(location) || ![1, 2, 3, 4, 5, 6].includes(location)) {
       return res.status(400).json({
         success: false,
         message: "Invalid checkpoint location. Must be between 1 and 6.",
       });
+    }
+
+    const expectedToken = process.env[`QR_SCAN_TOKEN_CP${location}`];
+    if (!expectedToken || token !== expectedToken) {
+      return res.status(401).json({ success: false, message: "Invalid or unauthorized token." });
     }
 
     // Find the published mmr-rally-special deal for this checkpoint
