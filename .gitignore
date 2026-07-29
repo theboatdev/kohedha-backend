@@ -23,6 +23,7 @@ dist/
 build/
 tmp/
 temp/
+qr-codes/
 
 # IDEs and editors
 .vscode/
