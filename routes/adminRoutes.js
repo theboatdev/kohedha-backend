@@ -3,44 +3,16 @@ import {
   adminLogin,
   adminLogout,
   getCurrentAdmin,
-  createAdmin,
-  getAllAdmins,
-  toggleAdminStatus,
-  getRallySubmissions,
-  getMobileUsers,
-  getMobileUsersRallyPerformance,
-  getMobileUserRallyPerformance,
 } from "../controller/adminController.js";
-import { requireAdmin, requireSuperAdmin, requireMmrAccess } from "../middleware/auth.js";
+import { requireAdmin } from "../middleware/auth.js";
 
 const router = express.Router();
 
 // Public routes
 router.post("/login", adminLogin);
 
-// Protected routes (any active admin)
+// Protected routes
 router.get("/me", requireAdmin, getCurrentAdmin);
 router.post("/logout", requireAdmin, adminLogout);
-
-// Super admin only routes
-router.post("/admins", requireAdmin, requireSuperAdmin, createAdmin);
-router.get("/admins", requireAdmin, requireSuperAdmin, getAllAdmins);
-router.patch("/admins/:id/status", requireAdmin, requireSuperAdmin, toggleAdminStatus);
-
-// MMR routes (super_admin + mmr_admin)
-router.get("/mmr/submissions", requireAdmin, requireMmrAccess, getRallySubmissions);
-router.get("/mmr/users", requireAdmin, requireMmrAccess, getMobileUsers);
-router.get(
-  "/mmr/users/rally-performance",
-  requireAdmin,
-  requireMmrAccess,
-  getMobileUsersRallyPerformance,
-);
-router.get(
-  "/mmr/users/:userId/rally-performance",
-  requireAdmin,
-  requireMmrAccess,
-  getMobileUserRallyPerformance,
-);
 
 export default router;

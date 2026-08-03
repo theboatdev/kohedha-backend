@@ -40,9 +40,6 @@ export const createDeal = async (req, res) => {
       isPublished,
       startDate,
       endDate,
-      dealType,
-      question,
-      rallyLocation,
     } = req.body;
 
     let tags = rawTags;
@@ -62,17 +59,6 @@ export const createDeal = async (req, res) => {
         message:
           "Please fill in all required fields (dealName, description, category)",
       });
-    }
-
-    if (dealType === "mmr-rally-special") {
-      const parsedLocation = parseInt(rallyLocation, 10);
-      if (![1, 2, 3, 4, 5, 6].includes(parsedLocation)) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "rallyLocation (1-6) is required for mmr-rally-special deals",
-        });
-      }
     }
 
     // Build mainImage: prefer uploaded file, fallback to body value
@@ -99,9 +85,6 @@ export const createDeal = async (req, res) => {
       publishedAt: isPublished ? new Date() : null,
       startDate: startDate ? new Date(startDate) : null,
       endDate: endDate ? new Date(endDate) : null,
-      dealType: dealType || "regular",
-      question: question || "",
-      rallyLocation: rallyLocation ? parseInt(rallyLocation, 10) : undefined,
     });
 
     console.log(
@@ -269,9 +252,6 @@ export const updateDeal = async (req, res) => {
       isPublished,
       startDate,
       endDate,
-      dealType,
-      question,
-      rallyLocation,
     } = req.body;
 
     let tags = rawTags;
@@ -296,10 +276,6 @@ export const updateDeal = async (req, res) => {
       deal.startDate = startDate ? new Date(startDate) : null;
     if (endDate !== undefined)
       deal.endDate = endDate ? new Date(endDate) : null;
-    if (dealType) deal.dealType = dealType;
-    if (question !== undefined) deal.question = question;
-    if (rallyLocation !== undefined)
-      deal.rallyLocation = rallyLocation ? parseInt(rallyLocation, 10) : undefined;
 
     // Handle image update
     if (req.file) {
@@ -325,17 +301,6 @@ export const updateDeal = async (req, res) => {
       if (isPublished && !deal.publishedAt) {
         deal.publishedAt = new Date();
       }
-    }
-
-    if (
-      deal.dealType === "mmr-rally-special" &&
-      ![1, 2, 3, 4, 5, 6].includes(deal.rallyLocation)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "rallyLocation (1-6) is required for mmr-rally-special deals",
-      });
     }
 
     const updatedDeal = await deal.save();
