@@ -24,6 +24,7 @@ import dashboardRoutes from "./routes/dashboardRoutes.js";
 import mobileRoutes from "./routes/mobileRoutes.js";
 import waitlistRoutes from "./routes/waitlistRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
+import { sweepExpiredClaims } from "./utils/dealClaimUtils.js";
 
 const app = express();
 const port = process.env.PORT || 5002;
@@ -79,3 +80,15 @@ app.use("/api/public/wait-list", waitlistRoutes);
 app.use("/api/admin", adminRoutes);
 
 app.listen(port, () => console.log(`Server running on port ${port}`));
+
+// Periodically release stock/expire holds that were abandoned rather than
+// redeemed or re-checked by the client (e.g. flash-deal reservations nobody
+// came back to). Lazy settling on read paths covers the rest.
+const CLAIM_SWEEP_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
+setInterval(() => {
+  sweepExpiredClaims()
+    .then((count) => {
+      if (count > 0) console.log(`[Claim Sweeper] Released ${count} expired claim(s)`);
+    })
+    .catch((err) => console.error("[Claim Sweeper] Error sweeping claims:", err.message));
+}, CLAIM_SWEEP_INTERVAL_MS);
