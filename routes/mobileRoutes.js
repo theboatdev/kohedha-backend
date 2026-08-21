@@ -6,6 +6,11 @@ import {
   getMobileDeals,
   getMobileDealById,
   getMobileDealsByVendor,
+  logDealTap,
+  claimDeal,
+  getMyClaims,
+  enrollLoyaltyDeal,
+  getMyLoyaltyCards,
   getMobileMenuByVendor,
   getMobileVenues,
   saveUserProfile,
@@ -31,6 +36,11 @@ router.get("/events/:id", getMobileEventById);
 // Deals
 router.get("/deals", getMobileDeals);
 router.get("/deals/:id", getMobileDealById);
+router.post("/deals/:id/tap", logDealTap);
+router.post("/deals/:id/claim", claimDeal);
+router.get("/claims", getMyClaims);
+router.post("/deals/:id/loyalty/enroll", enrollLoyaltyDeal);
+router.get("/loyalty-cards", getMyLoyaltyCards);
 
 // Menu item voting
 router.post("/menu/:menuItemId/vote", voteOnMenuItem);

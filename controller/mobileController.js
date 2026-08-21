@@ -1,6 +1,9 @@
 import mongoose from "mongoose";
 import Event from "../models/eventModel.js";
 import Deal from "../models/dealModel.js";
+import DealTap from "../models/dealTapModel.js";
+import DealClaim from "../models/dealClaimModel.js";
+import DealLoyaltyCard from "../models/dealLoyaltyCardModel.js";
 import Menu from "../models/menuModel.js";
 import Vendor from "../models/vendorModel.js";
 import MobileUser from "../models/mobileUserModel.js";
@@ -8,6 +11,12 @@ import BookingSlot from "../models/bookingSlotModel.js";
 import Table from "../models/tableModel.js";
 import Reservation from "../models/reservationModel.js";
 import { generateOccurrences } from "../utils/recurrenceUtils.js";
+import { isActiveNow } from "../utils/ambientWindowUtils.js";
+import {
+  generateUniqueVoucherCode,
+  generateUniqueLoyaltyCardCode,
+} from "../utils/voucherCodeUtils.js";
+import { expireClaimAndRelease } from "../utils/dealClaimUtils.js";
 
 function withVendorLocation(doc) {
   const item = doc.toObject ? doc.toObject() : { ...doc };
@@ -33,6 +42,8 @@ function withDealVenueInfo(doc) {
   return {
     ...withVendorLocation(doc),
     venueName: vendor?.companyName || vendor?.location?.businessName || null,
+    isActiveNow:
+      item.dealType === "ambient" ? isActiveNow(item.activeWindow) : null,
   };
 }
 
@@ -234,14 +245,17 @@ export const getMobileDealsByVendor = async (req, res) => {
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const total = await Deal.countDocuments(filter);
     const deals = await Deal.find(filter)
-      .populate({ path: "vendorId", select: "location.coordinates" })
+      .populate({
+        path: "vendorId",
+        select: "companyName location.coordinates location.businessName",
+      })
       .sort(sort)
       .skip(skip)
       .limit(parseInt(limit));
 
     res.status(200).json({
       success: true,
-      data: deals.map(withVendorLocation),
+      data: deals.map(withDealVenueInfo),
       pagination: {
         total,
         page: parseInt(page),
@@ -379,13 +393,346 @@ export const getMobileDealById = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: withVendorLocation(deal),
+      data: withDealVenueInfo(deal),
     });
   } catch (error) {
     console.error("[Mobile] Error fetching deal by ID:", error.message);
     res.status(500).json({
       success: false,
       message: error.message || "Error fetching deal",
+    });
+  }
+};
+
+// POST /api/mobile/deals/:id/tap
+// Fire-and-forget analytics tap log. Does not gate or check isActiveNow.
+// Always returns success quickly so the client is never blocked.
+export const logDealTap = async (req, res) => {
+  try {
+    const { id: dealId } = req.params;
+    const userId = req.user.uid;
+
+    if (!mongoose.isValidObjectId(dealId)) {
+      return res.status(400).json({ success: false, message: "Invalid deal ID" });
+    }
+
+    const deal = await Deal.findOne({ _id: dealId, isPublished: true }).select(
+      "vendorId",
+    );
+
+    if (!deal) {
+      return res.status(404).json({
+        success: false,
+        message: "Deal not found or not published",
+      });
+    }
+
+    await DealTap.create({ dealId, vendorId: deal.vendorId, userId });
+
+    res.status(201).json({ success: true });
+  } catch (error) {
+    console.error("[Mobile] Error logging deal tap:", error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Error logging tap",
+    });
+  }
+};
+
+// POST /api/mobile/deals/:id/claim
+// Claims a single-use voucher, OR reserves a slot on a limited-quantity
+// (flash) deal, for the authenticated user. Generates a unique code that
+// staff will validate server-side at redemption time.
+export const claimDeal = async (req, res) => {
+  try {
+    const { id: dealId } = req.params;
+    const userId = req.user.uid;
+
+    if (!mongoose.isValidObjectId(dealId)) {
+      return res.status(400).json({ success: false, message: "Invalid deal ID" });
+    }
+
+    const deal = await Deal.findOne({
+      _id: dealId,
+      isPublished: true,
+      status: "active",
+    });
+
+    if (!deal) {
+      return res.status(404).json({
+        success: false,
+        message: "Deal not found or not available",
+      });
+    }
+
+    if (!["voucher", "limited-quantity"].includes(deal.dealType)) {
+      return res.status(400).json({
+        success: false,
+        message: "This deal does not require claiming",
+      });
+    }
+
+    // Single-use per user: once redeemed, this deal can never be claimed again by them
+    const alreadyRedeemed = await DealClaim.findOne({
+      dealId,
+      userId,
+      status: "redeemed",
+    });
+
+    if (alreadyRedeemed) {
+      return res.status(409).json({
+        success: false,
+        message: "You've already redeemed this voucher. It can only be used once.",
+        data: alreadyRedeemed,
+      });
+    }
+
+    // One live claim per user per deal - re-return it instead of minting a duplicate
+    const existingClaim = await DealClaim.findOne({
+      dealId,
+      userId,
+      status: "claimed",
+    });
+
+    if (existingClaim) {
+      if (existingClaim.expiresAt > new Date()) {
+        return res.status(200).json({
+          success: true,
+          message: "You already have an active voucher for this deal",
+          data: existingClaim,
+        });
+      }
+      // Stale hold — release it (frees stock if limited-quantity) before re-claiming
+      await expireClaimAndRelease(existingClaim._id);
+    }
+
+    // Limited-quantity deals must atomically reserve a slot before minting a
+    // claim, otherwise concurrent requests could oversell the last slots.
+    let reservedDeal = null;
+    if (deal.dealType === "limited-quantity") {
+      reservedDeal = await Deal.findOneAndUpdate(
+        {
+          _id: dealId,
+          isPublished: true,
+          status: "active",
+          dealType: "limited-quantity",
+          "limitedQuantityConfig.remainingQuantity": { $gt: 0 },
+        },
+        { $inc: { "limitedQuantityConfig.remainingQuantity": -1 } },
+        { new: true },
+      );
+
+      if (!reservedDeal) {
+        return res.status(409).json({
+          success: false,
+          message: "This deal is sold out",
+        });
+      }
+    }
+
+    const config =
+      deal.dealType === "limited-quantity"
+        ? deal.limitedQuantityConfig
+        : deal.voucherConfig;
+    const claimExpiryMinutes =
+      config?.claimExpiryMinutes || (deal.dealType === "limited-quantity" ? 30 : 120);
+    const code = await generateUniqueVoucherCode();
+
+    let claim;
+    try {
+      claim = await DealClaim.create({
+        dealId,
+        vendorId: deal.vendorId,
+        userId,
+        code,
+        expiresAt: new Date(Date.now() + claimExpiryMinutes * 60 * 1000),
+      });
+    } catch (createError) {
+      // Compensate the reservation if claim creation failed, so we never leak stock
+      if (reservedDeal) {
+        await Deal.updateOne(
+          { _id: dealId },
+          { $inc: { "limitedQuantityConfig.remainingQuantity": 1 } },
+        );
+      }
+      throw createError;
+    }
+
+    // Flip to sold-out once the last slot is taken
+    if (reservedDeal && reservedDeal.limitedQuantityConfig.remainingQuantity === 0) {
+      await Deal.updateOne({ _id: dealId }, { $set: { status: "sold-out" } });
+    }
+
+    res.status(201).json({
+      success: true,
+      message:
+        deal.dealType === "limited-quantity"
+          ? "Slot reserved successfully"
+          : "Voucher claimed successfully",
+      data: claim,
+    });
+  } catch (error) {
+    console.error("[Mobile] Error claiming deal:", error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Error claiming deal",
+    });
+  }
+};
+
+// GET /api/mobile/claims
+// Returns the authenticated user's voucher claims (e.g. for a "My Vouchers" screen).
+export const getMyClaims = async (req, res) => {
+  try {
+    const userId = req.user.uid;
+    const { status, page = 1, limit = 20 } = req.query;
+
+    const filter = { userId };
+    if (status) filter.status = status;
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const total = await DealClaim.countDocuments(filter);
+
+    const claims = await DealClaim.find(filter)
+      .populate({ path: "dealId", select: "dealName description mainImage dealType" })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    // Lazily settle any claims that have quietly expired while listing them
+    // (also releases held stock back for limited-quantity deals)
+    const now = new Date();
+    const staleIds = claims
+      .filter((c) => c.status === "claimed" && c.expiresAt < now)
+      .map((c) => c._id);
+    if (staleIds.length > 0) {
+      await Promise.all(staleIds.map((id) => expireClaimAndRelease(id)));
+      claims.forEach((c) => {
+        if (staleIds.some((id) => id.equals(c._id))) c.status = "expired";
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: claims,
+      pagination: {
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        pages: Math.ceil(total / parseInt(limit)),
+      },
+    });
+  } catch (error) {
+    console.error("[Mobile] Error fetching claims:", error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Error fetching claims",
+    });
+  }
+};
+
+// POST /api/mobile/deals/:id/loyalty/enroll
+// Get-or-create the authenticated user's loyalty card for a deal. The
+// returned code is what the user presents to staff at each visit to get a
+// stamp — it stays valid for the whole life of the card (unlike a voucher
+// code, which is single-use).
+export const enrollLoyaltyDeal = async (req, res) => {
+  try {
+    const { id: dealId } = req.params;
+    const userId = req.user.uid;
+
+    if (!mongoose.isValidObjectId(dealId)) {
+      return res.status(400).json({ success: false, message: "Invalid deal ID" });
+    }
+
+    const deal = await Deal.findOne({
+      _id: dealId,
+      isPublished: true,
+      status: "active",
+      dealType: "loyalty",
+    });
+
+    if (!deal) {
+      return res.status(404).json({
+        success: false,
+        message: "Loyalty deal not found or not available",
+      });
+    }
+
+    let card = await DealLoyaltyCard.findOne({ dealId, userId });
+
+    if (!card) {
+      const code = await generateUniqueLoyaltyCardCode();
+      try {
+        card = await DealLoyaltyCard.create({
+          dealId,
+          vendorId: deal.vendorId,
+          userId,
+          code,
+        });
+      } catch (err) {
+        // Duplicate key race: another concurrent request created it first
+        if (err.code === 11000) {
+          card = await DealLoyaltyCard.findOne({ dealId, userId });
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Loyalty card ready",
+      data: {
+        card,
+        stampsRequired: deal.loyaltyConfig?.stampsRequired || 9,
+        rewardLabel: deal.loyaltyConfig?.rewardLabel || "",
+      },
+    });
+  } catch (error) {
+    console.error("[Mobile] Error enrolling in loyalty deal:", error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Error enrolling in loyalty deal",
+    });
+  }
+};
+
+// GET /api/mobile/loyalty-cards
+// Returns the authenticated user's loyalty cards (e.g. for a "My Stamps" screen).
+export const getMyLoyaltyCards = async (req, res) => {
+  try {
+    const userId = req.user.uid;
+    const { page = 1, limit = 20 } = req.query;
+
+    const filter = { userId };
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const total = await DealLoyaltyCard.countDocuments(filter);
+
+    const cards = await DealLoyaltyCard.find(filter)
+      .populate({
+        path: "dealId",
+        select: "dealName description mainImage loyaltyConfig",
+      })
+      .sort({ updatedAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    res.status(200).json({
+      success: true,
+      data: cards,
+      pagination: {
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        pages: Math.ceil(total / parseInt(limit)),
+      },
+    });
+  } catch (error) {
+    console.error("[Mobile] Error fetching loyalty cards:", error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Error fetching loyalty cards",
     });
   }
 };

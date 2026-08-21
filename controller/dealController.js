@@ -1,5 +1,18 @@
 import Deal from "../models/dealModel.js";
+import DealClaim from "../models/dealClaimModel.js";
 import cloudinary from "../config/cloudinary.js";
+import { isActiveNow } from "../utils/ambientWindowUtils.js";
+import { expireClaimAndRelease } from "../utils/dealClaimUtils.js";
+
+// Serialize a deal document, appending isActiveNow for ambient deals
+function serializeDeal(deal) {
+  const obj = deal.toObject ? deal.toObject() : { ...deal };
+  return {
+    ...obj,
+    isActiveNow:
+      obj.dealType === "ambient" ? isActiveNow(obj.activeWindow) : null,
+  };
+}
 
 // Helper: extract cloudinary public_id from URL
 function extractPublicId(url) {
@@ -40,6 +53,11 @@ export const createDeal = async (req, res) => {
       isPublished,
       startDate,
       endDate,
+      dealType,
+      activeWindow: rawActiveWindow,
+      voucherConfig: rawVoucherConfig,
+      limitedQuantityConfig: rawLimitedQuantityConfig,
+      loyaltyConfig: rawLoyaltyConfig,
     } = req.body;
 
     let tags = rawTags;
@@ -51,6 +69,42 @@ export const createDeal = async (req, res) => {
       }
     }
 
+    let activeWindow = rawActiveWindow;
+    if (typeof rawActiveWindow === "string") {
+      try {
+        activeWindow = JSON.parse(rawActiveWindow);
+      } catch {
+        activeWindow = null;
+      }
+    }
+
+    let voucherConfig = rawVoucherConfig;
+    if (typeof rawVoucherConfig === "string") {
+      try {
+        voucherConfig = JSON.parse(rawVoucherConfig);
+      } catch {
+        voucherConfig = null;
+      }
+    }
+
+    let limitedQuantityConfig = rawLimitedQuantityConfig;
+    if (typeof rawLimitedQuantityConfig === "string") {
+      try {
+        limitedQuantityConfig = JSON.parse(rawLimitedQuantityConfig);
+      } catch {
+        limitedQuantityConfig = null;
+      }
+    }
+
+    let loyaltyConfig = rawLoyaltyConfig;
+    if (typeof rawLoyaltyConfig === "string") {
+      try {
+        loyaltyConfig = JSON.parse(rawLoyaltyConfig);
+      } catch {
+        loyaltyConfig = null;
+      }
+    }
+
     // Validation
     if (!dealName || !description || !category) {
       console.error("[Create Deal] Validation failed: Missing required fields");
@@ -59,6 +113,54 @@ export const createDeal = async (req, res) => {
         message:
           "Please fill in all required fields (dealName, description, category)",
       });
+    }
+
+    if (dealType === "limited-quantity") {
+      const totalQuantity = Number(limitedQuantityConfig?.totalQuantity);
+      if (!totalQuantity || totalQuantity < 1) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Please provide a totalQuantity of at least 1 for a limited-quantity deal",
+        });
+      }
+      const claimExpiryMinutes = Number(
+        limitedQuantityConfig?.claimExpiryMinutes,
+      );
+      // remainingQuantity always starts equal to totalQuantity — clients can't set it directly
+      limitedQuantityConfig = {
+        totalQuantity,
+        remainingQuantity: totalQuantity,
+        claimExpiryMinutes:
+          Number.isFinite(claimExpiryMinutes) && claimExpiryMinutes >= 5
+            ? Math.min(claimExpiryMinutes, 10080)
+            : 30,
+        rewardLabel: limitedQuantityConfig?.rewardLabel || "",
+      };
+    } else {
+      // Don't persist an empty nested object — Mongoose would still run
+      // min validators on claimExpiryMinutes and reject the create.
+      limitedQuantityConfig = undefined;
+    }
+
+    if (dealType === "loyalty") {
+      const stampsRequired = Number(loyaltyConfig?.stampsRequired);
+      const claimExpiryMinutes = Number(loyaltyConfig?.claimExpiryMinutes);
+      loyaltyConfig = {
+        stampsRequired:
+          Number.isFinite(stampsRequired) && stampsRequired >= 2
+            ? Math.min(stampsRequired, 100)
+            : 9,
+        claimExpiryMinutes:
+          Number.isFinite(claimExpiryMinutes) && claimExpiryMinutes >= 5
+            ? Math.min(claimExpiryMinutes, 10080)
+            : 10080,
+        rewardLabel: loyaltyConfig?.rewardLabel || "",
+      };
+    } else {
+      // Don't persist an empty nested object — Mongoose would still run
+      // min validators on the nested numeric fields and reject the create.
+      loyaltyConfig = undefined;
     }
 
     // Build mainImage: prefer uploaded file, fallback to body value
@@ -85,6 +187,11 @@ export const createDeal = async (req, res) => {
       publishedAt: isPublished ? new Date() : null,
       startDate: startDate ? new Date(startDate) : null,
       endDate: endDate ? new Date(endDate) : null,
+      dealType: dealType || "ambient",
+      activeWindow: activeWindow || {},
+      voucherConfig: voucherConfig || {},
+      ...(limitedQuantityConfig ? { limitedQuantityConfig } : {}),
+      ...(loyaltyConfig ? { loyaltyConfig } : {}),
     });
 
     console.log(
@@ -93,10 +200,17 @@ export const createDeal = async (req, res) => {
     res.status(201).json({
       success: true,
       message: "Deal created successfully",
-      data: deal,
+      data: serializeDeal(deal),
     });
   } catch (error) {
     console.error("[Create Deal] Error creating deal:", error.message);
+    if (error.name === "ValidationError") {
+      const firstMessage = Object.values(error.errors || {})[0]?.message;
+      return res.status(400).json({
+        success: false,
+        message: firstMessage || error.message,
+      });
+    }
     res.status(500).json({
       success: false,
       message: error.message || "Error creating deal",
@@ -157,7 +271,7 @@ export const getAllDeals = async (req, res) => {
     );
     res.status(200).json({
       success: true,
-      data: deals,
+      data: deals.map(serializeDeal),
       pagination: {
         total: totalDeals,
         page: parseInt(page),
@@ -201,7 +315,7 @@ export const getDealById = async (req, res) => {
     console.log(`[Get Deal By ID] Successfully fetched deal: ${deal._id}`);
     res.status(200).json({
       success: true,
-      data: deal,
+      data: serializeDeal(deal),
     });
   } catch (error) {
     console.error("[Get Deal By ID] Error fetching deal:", error.message);
@@ -252,6 +366,11 @@ export const updateDeal = async (req, res) => {
       isPublished,
       startDate,
       endDate,
+      dealType,
+      activeWindow: rawActiveWindow,
+      voucherConfig: rawVoucherConfig,
+      limitedQuantityConfig: rawLimitedQuantityConfig,
+      loyaltyConfig: rawLoyaltyConfig,
     } = req.body;
 
     let tags = rawTags;
@@ -260,6 +379,42 @@ export const updateDeal = async (req, res) => {
         tags = JSON.parse(rawTags);
       } catch {
         tags = rawTags ? [rawTags] : [];
+      }
+    }
+
+    let activeWindow = rawActiveWindow;
+    if (typeof rawActiveWindow === "string") {
+      try {
+        activeWindow = JSON.parse(rawActiveWindow);
+      } catch {
+        activeWindow = undefined;
+      }
+    }
+
+    let voucherConfig = rawVoucherConfig;
+    if (typeof rawVoucherConfig === "string") {
+      try {
+        voucherConfig = JSON.parse(rawVoucherConfig);
+      } catch {
+        voucherConfig = undefined;
+      }
+    }
+
+    let limitedQuantityConfig = rawLimitedQuantityConfig;
+    if (typeof rawLimitedQuantityConfig === "string") {
+      try {
+        limitedQuantityConfig = JSON.parse(rawLimitedQuantityConfig);
+      } catch {
+        limitedQuantityConfig = undefined;
+      }
+    }
+
+    let loyaltyConfig = rawLoyaltyConfig;
+    if (typeof rawLoyaltyConfig === "string") {
+      try {
+        loyaltyConfig = JSON.parse(rawLoyaltyConfig);
+      } catch {
+        loyaltyConfig = undefined;
       }
     }
 
@@ -276,6 +431,67 @@ export const updateDeal = async (req, res) => {
       deal.startDate = startDate ? new Date(startDate) : null;
     if (endDate !== undefined)
       deal.endDate = endDate ? new Date(endDate) : null;
+    if (dealType) deal.dealType = dealType;
+    if (activeWindow !== undefined) deal.activeWindow = activeWindow;
+    if (voucherConfig !== undefined)
+      deal.voucherConfig = { ...deal.voucherConfig, ...voucherConfig };
+    if (limitedQuantityConfig !== undefined) {
+      const current = deal.limitedQuantityConfig || {};
+      const nextTotal = Number(
+        limitedQuantityConfig.totalQuantity ?? current.totalQuantity ?? 0,
+      );
+      // Never let clients set remainingQuantity directly — only totalQuantity
+      // changes flow through, shifting remaining by the same delta so
+      // slots already claimed/held stay accounted for.
+      const currentTotal = Number(current.totalQuantity ?? 0);
+      const currentRemaining = Number(current.remainingQuantity ?? 0);
+      const delta = nextTotal - currentTotal;
+      const nextRemaining = Math.max(0, currentRemaining + delta);
+
+      const rawExpiry = Number(
+        limitedQuantityConfig.claimExpiryMinutes ??
+          current.claimExpiryMinutes ??
+          30,
+      );
+      const claimExpiryMinutes =
+        Number.isFinite(rawExpiry) && rawExpiry >= 5
+          ? Math.min(rawExpiry, 10080)
+          : 30;
+
+      deal.limitedQuantityConfig = {
+        ...current,
+        ...limitedQuantityConfig,
+        totalQuantity: nextTotal,
+        remainingQuantity: nextRemaining,
+        claimExpiryMinutes,
+      };
+    }
+    if (loyaltyConfig !== undefined) {
+      const current = deal.loyaltyConfig || {};
+
+      const rawStamps = Number(
+        loyaltyConfig.stampsRequired ?? current.stampsRequired ?? 9,
+      );
+      const stampsRequired =
+        Number.isFinite(rawStamps) && rawStamps >= 2
+          ? Math.min(rawStamps, 100)
+          : 9;
+
+      const rawExpiry = Number(
+        loyaltyConfig.claimExpiryMinutes ?? current.claimExpiryMinutes ?? 10080,
+      );
+      const claimExpiryMinutes =
+        Number.isFinite(rawExpiry) && rawExpiry >= 5
+          ? Math.min(rawExpiry, 10080)
+          : 10080;
+
+      deal.loyaltyConfig = {
+        ...current,
+        ...loyaltyConfig,
+        stampsRequired,
+        claimExpiryMinutes,
+      };
+    }
 
     // Handle image update
     if (req.file) {
@@ -309,7 +525,7 @@ export const updateDeal = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Deal updated successfully",
-      data: updatedDeal,
+      data: serializeDeal(updatedDeal),
     });
   } catch (error) {
     console.error("[Update Deal] Error updating deal:", error.message);
@@ -390,7 +606,7 @@ export const searchDeals = async (req, res) => {
     );
     res.status(200).json({
       success: true,
-      data: deals,
+      data: deals.map(serializeDeal),
     });
   } catch (error) {
     console.error("[Search Deals] Error searching deals:", error.message);
@@ -446,7 +662,7 @@ export const getDealsByCategory = async (req, res) => {
     );
     res.status(200).json({
       success: true,
-      data: deals,
+      data: deals.map(serializeDeal),
       pagination: {
         total: totalDeals,
         page: parseInt(page),
@@ -462,6 +678,149 @@ export const getDealsByCategory = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message || "Error fetching deals by category",
+    });
+  }
+};
+
+// POST /api/vendor/deals/redeem
+// Staff-side redemption: looks up a voucher claim by its code, validates it
+// belongs to this vendor and is still usable, then flips it to "redeemed".
+// This is the only place a claim transitions to redeemed - always server-side.
+export const redeemVoucherCode = async (req, res) => {
+  try {
+    const { code } = req.body;
+
+    if (!code || typeof code !== "string") {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a voucher code",
+      });
+    }
+
+    const normalizedCode = code.trim().toUpperCase();
+
+    let claim = await DealClaim.findOne({
+      code: normalizedCode,
+      vendorId: req.vendor.id,
+    }).populate({
+      path: "dealId",
+      select: "dealName description dealType voucherConfig limitedQuantityConfig loyaltyConfig",
+    });
+
+    if (!claim) {
+      console.warn(
+        `[Redeem Voucher] Code not found for vendor ${req.vendor.id}: ${normalizedCode}`,
+      );
+      return res.status(404).json({
+        success: false,
+        message: "Voucher code not found for your venue",
+      });
+    }
+
+    // Lazily settle expiry so stale "claimed" claims don't redeem past their
+    // window — also releases the reserved slot back to stock for
+    // limited-quantity deals.
+    if (claim.status === "claimed" && claim.expiresAt < new Date()) {
+      await expireClaimAndRelease(claim._id);
+      claim = await DealClaim.findById(claim._id).populate({
+        path: "dealId",
+        select: "dealName description dealType voucherConfig limitedQuantityConfig loyaltyConfig",
+      });
+    }
+
+    if (claim.status === "redeemed") {
+      return res.status(409).json({
+        success: false,
+        message: `This voucher was already redeemed at ${new Date(
+          claim.redeemedAt,
+        ).toLocaleString()}`,
+        data: claim,
+      });
+    }
+
+    if (claim.status === "expired") {
+      return res.status(410).json({
+        success: false,
+        message: "This voucher has expired",
+        data: claim,
+      });
+    }
+
+    if (claim.status === "cancelled") {
+      return res.status(410).json({
+        success: false,
+        message: "This voucher has been cancelled",
+        data: claim,
+      });
+    }
+
+    // status === "claimed" and still within window -> redeem it now
+    claim.status = "redeemed";
+    claim.redeemedAt = new Date();
+    await claim.save();
+
+    console.log(
+      `[Redeem Voucher] Vendor ${req.vendor.id} redeemed code ${normalizedCode} (deal ${claim.dealId?._id})`,
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Voucher redeemed successfully",
+      data: claim,
+    });
+  } catch (error) {
+    console.error("[Redeem Voucher] Error redeeming voucher:", error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Error redeeming voucher",
+    });
+  }
+};
+
+// GET /api/vendor/deals/:id/claims
+// Lists voucher claims for a deal owned by this vendor (for auditing/analytics).
+export const getDealClaims = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, page = 1, limit = 20 } = req.query;
+
+    const deal = await Deal.findById(id).select("vendorId");
+    if (!deal) {
+      return res.status(404).json({ success: false, message: "Deal not found" });
+    }
+
+    if (deal.vendorId.toString() !== req.vendor.id) {
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized to view claims for this deal",
+      });
+    }
+
+    const filter = { dealId: id };
+    if (status) filter.status = status;
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const total = await DealClaim.countDocuments(filter);
+    const claims = await DealClaim.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    res.status(200).json({
+      success: true,
+      data: claims,
+      pagination: {
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        pages: Math.ceil(total / parseInt(limit)),
+      },
+    });
+  } catch (error) {
+    console.error("[Get Deal Claims] Error fetching claims:", error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Error fetching deal claims",
     });
   }
 };

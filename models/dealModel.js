@@ -102,6 +102,107 @@ const dealSchema = mongoose.Schema(
       },
     },
 
+    dealType: {
+      type: String,
+      enum: ["ambient", "voucher", "limited-quantity", "loyalty"],
+      default: "ambient",
+    },
+
+    // Only used when dealType === "ambient"
+    activeWindow: {
+      daysOfWeek: {
+        type: [Number], // 0=Sun … 6=Sat, matches JS Date#getDay() convention
+        default: [],
+        validate: {
+          validator: (arr) => arr.every((d) => d >= 0 && d <= 6),
+          message: "daysOfWeek must contain values 0–6",
+        },
+      },
+      startTime: {
+        type: String,
+        validate: {
+          validator: (v) => !v || /^([01]\d|2[0-3]):([0-5]\d)$/.test(v),
+          message: "Invalid time format. Use HH:mm (24-hour)",
+        },
+      },
+      endTime: {
+        type: String,
+        validate: {
+          validator: (v) => !v || /^([01]\d|2[0-3]):([0-5]\d)$/.test(v),
+          message: "Invalid time format. Use HH:mm (24-hour)",
+        },
+      },
+    },
+
+    // Only used when dealType === "voucher"
+    voucherConfig: {
+      // How long a claimed voucher stays valid before auto-expiring, if unused
+      claimExpiryMinutes: {
+        type: Number,
+        min: [5, "Claim expiry must be at least 5 minutes"],
+        max: [10080, "Claim expiry cannot exceed 7 days"],
+        default: 120,
+      },
+      // Short label shown to staff/customers, e.g. "BOGO", "Free Appetizer", "20% off"
+      rewardLabel: {
+        type: String,
+        trim: true,
+        maxlength: [100, "Reward label cannot exceed 100 characters"],
+      },
+    },
+
+    // Only used when dealType === "limited-quantity"
+    limitedQuantityConfig: {
+      // Total number of slots this deal was created with (fixed at creation)
+      totalQuantity: {
+        type: Number,
+        min: [1, "Total quantity must be at least 1"],
+      },
+      // Live counter — decremented on claim, incremented back on expire/cancel
+      remainingQuantity: {
+        type: Number,
+        min: [0, "Remaining quantity cannot be negative"],
+      },
+      // How long a claimed slot stays held before its reservation auto-releases
+      claimExpiryMinutes: {
+        type: Number,
+        min: [5, "Claim expiry must be at least 5 minutes"],
+        max: [10080, "Claim expiry cannot exceed 7 days"],
+        default: 30,
+      },
+      // Short label shown to staff/customers, e.g. "First 50 customers"
+      rewardLabel: {
+        type: String,
+        trim: true,
+        maxlength: [100, "Reward label cannot exceed 100 characters"],
+      },
+    },
+
+    // Only used when dealType === "loyalty"
+    loyaltyConfig: {
+      // Stamps a customer must collect before a reward token is minted,
+      // e.g. "buy 9, get the 10th free" -> stampsRequired = 9
+      stampsRequired: {
+        type: Number,
+        min: [2, "Stamps required must be at least 2"],
+        max: [100, "Stamps required cannot exceed 100"],
+        default: 9,
+      },
+      // How long a minted reward token stays valid before auto-expiring, if unused
+      claimExpiryMinutes: {
+        type: Number,
+        min: [5, "Claim expiry must be at least 5 minutes"],
+        max: [10080, "Claim expiry cannot exceed 7 days"],
+        default: 10080,
+      },
+      // Short label shown to staff/customers, e.g. "Buy 9, get the 10th free"
+      rewardLabel: {
+        type: String,
+        trim: true,
+        maxlength: [100, "Reward label cannot exceed 100 characters"],
+      },
+    },
+
     status: {
       type: String,
       enum: ["active", "expired", "coming-soon", "paused", "sold-out"],
