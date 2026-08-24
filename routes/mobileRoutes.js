@@ -9,6 +9,7 @@ import {
   logDealTap,
   claimDeal,
   getMyClaims,
+  getClaimById,
   enrollLoyaltyDeal,
   getMyLoyaltyCards,
   getMobileMenuByVendor,
@@ -39,6 +40,7 @@ router.get("/deals/:id", getMobileDealById);
 router.post("/deals/:id/tap", logDealTap);
 router.post("/deals/:id/claim", claimDeal);
 router.get("/claims", getMyClaims);
+router.get("/claims/:id", getClaimById);
 router.post("/deals/:id/loyalty/enroll", enrollLoyaltyDeal);
 router.get("/loyalty-cards", getMyLoyaltyCards);
 
