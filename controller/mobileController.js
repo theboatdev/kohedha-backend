@@ -149,14 +149,26 @@ export const getMobileEventById = async (req, res) => {
 
 // GET /api/mobile/deals
 // Returns all published, active deals across all vendors
+const VALID_DEAL_TYPES = ["ambient", "voucher", "limited-quantity", "loyalty"];
+
 export const getMobileDeals = async (req, res) => {
   try {
-    const { category, sortBy, page = 1, limit = 20 } = req.query;
+    const { category, dealType, sortBy, page = 1, limit = 20 } = req.query;
 
     const filter = { isPublished: true, status: "active" };
 
     if (category) {
       filter.category = category;
+    }
+
+    if (dealType) {
+      if (!VALID_DEAL_TYPES.includes(dealType)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid dealType. Must be one of: ${VALID_DEAL_TYPES.join(", ")}`,
+        });
+      }
+      filter.dealType = dealType;
     }
 
     let sort = { priority: 1, createdAt: -1 };
@@ -222,7 +234,7 @@ export const getMobileDealsByVendor = async (req, res) => {
       });
     }
 
-    const { category, sortBy, page = 1, limit = 20 } = req.query;
+    const { category, dealType, sortBy, page = 1, limit = 20 } = req.query;
 
     const filter = {
       vendorId,
@@ -232,6 +244,16 @@ export const getMobileDealsByVendor = async (req, res) => {
 
     if (category) {
       filter.category = category;
+    }
+
+    if (dealType) {
+      if (!VALID_DEAL_TYPES.includes(dealType)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid dealType. Must be one of: ${VALID_DEAL_TYPES.join(", ")}`,
+        });
+      }
+      filter.dealType = dealType;
     }
 
     let sort = { priority: 1, createdAt: -1 };
@@ -627,6 +649,54 @@ export const getMyClaims = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message || "Error fetching claims",
+    });
+  }
+};
+
+// GET /api/mobile/claims/:id
+// Returns a single claim belonging to the authenticated user (e.g. a
+// voucher/reward detail screen). Scoped to userId so one user can never
+// look up another's claim by guessing/enumerating IDs.
+export const getClaimById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.uid;
+
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ success: false, message: "Invalid claim ID" });
+    }
+
+    let claim = await DealClaim.findOne({ _id: id, userId }).populate({
+      path: "dealId",
+      select: "dealName description mainImage dealType",
+    });
+
+    if (!claim) {
+      return res.status(404).json({
+        success: false,
+        message: "Claim not found",
+      });
+    }
+
+    // Lazily settle expiry so a stale "claimed" claim doesn't read as live
+    // (also releases held stock back for limited-quantity deals)
+    if (claim.status === "claimed" && claim.expiresAt < new Date()) {
+      await expireClaimAndRelease(claim._id);
+      claim = await DealClaim.findById(claim._id).populate({
+        path: "dealId",
+        select: "dealName description mainImage dealType",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: claim,
+    });
+  } catch (error) {
+    console.error("[Mobile] Error fetching claim:", error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Error fetching claim",
     });
   }
 };
